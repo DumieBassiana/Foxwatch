@@ -1,0 +1,51 @@
+cff-version: 1.2.0
+message: "If you use FoxWatch, please cite both the software and the accompanying paper."
+title: "FoxWatch: A User-Friendly Tool for Estimating Fox Abundance from Camera Traps Using Simultaneous-Count Models"
+version: "1.1"
+date-released: "2026-01-01"
+license: MIT
+type: software
+authors:
+  - family-names: "Dissanayake"
+    given-names: "Duminda S. B."
+    email: "dumie.dissanayake@dcceew.nsw.gov.au"
+    affiliation: "NSW Saving Our Species, Department of Climate Change, Energy, the Environment and Water (DCCEEW)"
+  - family-names: "Armstrong"
+    given-names: "Graeme"
+    affiliation: "NSW Saving Our Species, Department of Climate Change, Energy, the Environment and Water (DCCEEW)"
+repository-code: "https://github.com/DumieBassiana/Foxwatch"
+keywords:
+  - "red fox"
+  - "Vulpes vulpes"
+  - "camera trap"
+  - "abundance estimation"
+  - "simultaneous count model"
+  - "Bayesian"
+  - "JAGS"
+  - "R Shiny"
+  - "wildlife monitoring"
+  - "conservation"
+preferred-citation:
+  type: article
+  title: "FoxWatch: A User-Friendly Tool for Estimating Fox Abundance from Camera Traps Using Simultaneous-Count Models"
+  authors:
+    - family-names: "Dissanayake"
+      given-names: "Duminda S. B."
+    - family-names: "Armstrong"
+      given-names: "Graeme"
+  year: 2026
+  notes: "DOI to be added on acceptance."
+references:
+  - type: article
+    title: "Estimating fox abundance using the simultaneous count method"
+    authors:
+      - family-names: "Armstrong"
+        given-names: "Graeme"
+      - family-names: "McSorley"
+        given-names: "A."
+    journal: "Wildlife Letters"
+    volume: 2
+    start: 102
+    end: 109
+    year: 2024
+    doi: "10.1002/wll2.12038"

@@ -1,0 +1,44 @@
+# --- R session state -----------------------------------------------------
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.Rproj.user/
+
+# --- RStudio / project files --------------------------------------------
+*.Rproj
+*.Rcheck/
+
+# --- knitr / rmarkdown / quarto -----------------------------------------
+*.utf8.md
+*.knit.md
+*_cache/
+*_files/
+.quarto/
+
+# --- package build artefacts --------------------------------------------
+src/*.o
+src/*.so
+src/*.dll
+
+# --- Shiny / app outputs (regenerated each run) -------------------------
+model.txt
+FoxWatch_Abundance_*.csv
+FoxWatch_Map_*.png
+DailyCounts_ForModel_*.txt
+Fox_Detections_*.txt
+
+# --- OS noise -----------------------------------------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# --- editors ------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- one-time helpers (delete or ignore) --------------------------------
+PUSH_TO_GITHUB.md
