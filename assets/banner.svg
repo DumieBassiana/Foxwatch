@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 280" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
   <title id="title">FoxWatch — Bayesian Fox Abundance Estimation from Camera Traps</title>
-  <desc id="desc">Banner showing a stylised geometric fox face on the left, the FoxWatch wordmark with version 1.1 badge in the centre with subtitle and authors, and a camera trap icon on the right, against a deep navy background.</desc>
+  <desc id="desc">Animated banner: a stylised geometric fox face on the left bobs up and down, the FoxWatch wordmark and subtitle sit in the centre, a camera trap icon is on the right, and a version 1.1 pill is placed along the bottom.</desc>
 
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -15,38 +15,48 @@
   <rect y="277" width="1200" height="3" fill="#E8843C" opacity="0.45"/>
 
   <g transform="translate(140 138)">
-    <path d="M -68 -42 L -42 -82 L -28 -28 Z" fill="#E8843C"/>
-    <path d="M  68 -42 L  42 -82 L  28 -28 Z" fill="#E8843C"/>
-    <path d="M -56 -45 L -42 -67 L -34 -34 Z" fill="#1B2A41"/>
-    <path d="M  56 -45 L  42 -67 L  34 -34 Z" fill="#1B2A41"/>
+    <g>
+      <animateTransform attributeName="transform" type="translate"
+                        values="0 0; 0 -10; 0 0; 0 10; 0 0"
+                        keyTimes="0; 0.25; 0.5; 0.75; 1"
+                        dur="2.4s"
+                        calcMode="spline"
+                        keySplines="0.42 0 0.58 1; 0.42 0 0.58 1; 0.42 0 0.58 1; 0.42 0 0.58 1"
+                        repeatCount="indefinite"/>
 
-    <path d="M -56 -38 Q -60 -10 -50 18 Q -28 56 0 60 Q 28 56 50 18 Q 60 -10 56 -38 Z" fill="#E8843C"/>
+      <path d="M -68 -42 L -42 -82 L -28 -28 Z" fill="#E8843C"/>
+      <path d="M  68 -42 L  42 -82 L  28 -28 Z" fill="#E8843C"/>
+      <path d="M -56 -45 L -42 -67 L -34 -34 Z" fill="#1B2A41"/>
+      <path d="M  56 -45 L  42 -67 L  34 -34 Z" fill="#1B2A41"/>
 
-    <path d="M 0 -2 Q -22 22 -28 50 Q -10 60 0 50 Z" fill="#F5F0E6"/>
-    <path d="M 0 -2 Q  22 22  28 50 Q  10 60 0 50 Z" fill="#F5F0E6"/>
+      <path d="M -56 -38 Q -60 -10 -50 18 Q -28 56 0 60 Q 28 56 50 18 Q 60 -10 56 -38 Z" fill="#E8843C"/>
 
-    <ellipse cx="-22" cy="-10" rx="7" ry="9" fill="#1B2A41"/>
-    <ellipse cx="22"  cy="-10" rx="7" ry="9" fill="#1B2A41"/>
-    <circle cx="-19" cy="-13" r="2.4" fill="#F5F0E6"/>
-    <circle cx="25"  cy="-13" r="2.4" fill="#F5F0E6"/>
+      <path d="M 0 -2 Q -22 22 -28 50 Q -10 60 0 50 Z" fill="#F5F0E6"/>
+      <path d="M 0 -2 Q  22 22  28 50 Q  10 60 0 50 Z" fill="#F5F0E6"/>
 
-    <path d="M 0 14 L -9 6 L 9 6 Z" fill="#1B2A41"/>
-    <line x1="0" y1="14" x2="0" y2="26" stroke="#1B2A41" stroke-width="2.5" stroke-linecap="round"/>
+      <ellipse cx="-22" cy="-10" rx="7" ry="9" fill="#1B2A41"/>
+      <ellipse cx="22"  cy="-10" rx="7" ry="9" fill="#1B2A41"/>
+      <circle cx="-19" cy="-13" r="2.4" fill="#F5F0E6"/>
+      <circle cx="25"  cy="-13" r="2.4" fill="#F5F0E6"/>
 
-    <path d="M -78 0 Q -90 -8 -82 -22" stroke="#E8843C" stroke-width="2" fill="none" opacity="0.5" stroke-linecap="round"/>
-    <path d="M 78 0 Q 90 -8 82 -22" stroke="#E8843C" stroke-width="2" fill="none" opacity="0.5" stroke-linecap="round"/>
+      <path d="M 0 14 L -9 6 L 9 6 Z" fill="#1B2A41"/>
+      <line x1="0" y1="14" x2="0" y2="26" stroke="#1B2A41" stroke-width="2.5" stroke-linecap="round"/>
+
+      <path d="M -78 0 Q -90 -8 -82 -22" stroke="#E8843C" stroke-width="2" fill="none" opacity="0.5" stroke-linecap="round"/>
+      <path d="M 78 0 Q 90 -8 82 -22" stroke="#E8843C" stroke-width="2" fill="none" opacity="0.5" stroke-linecap="round"/>
+    </g>
   </g>
 
   <text x="290" y="120" fill="#F5F0E6" font-family="Georgia, 'Times New Roman', serif" font-size="76" font-weight="700">FoxWatch</text>
 
-  <g transform="translate(595 78)">
+  <text x="290" y="160" fill="#B8C4D6" font-family="Helvetica, Arial, sans-serif" font-size="20" font-style="italic">Bayesian Fox Abundance Estimation from Camera-Trap Data</text>
+
+  <text x="290" y="198" fill="#8B97A9" font-family="Helvetica, Arial, sans-serif" font-size="13" letter-spacing="2">DISSANAYAKE  &amp;  ARMSTRONG  ·  2026</text>
+
+  <g transform="translate(571 234)">
     <rect width="58" height="30" rx="15" fill="#E8843C"/>
     <text x="29" y="21" text-anchor="middle" fill="#0F1A2A" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">v1.1</text>
   </g>
-
-  <text x="290" y="160" fill="#B8C4D6" font-family="Helvetica, Arial, sans-serif" font-size="20" font-style="italic">Bayesian Fox Abundance Estimation from Camera-Trap Data</text>
-
-  <text x="290" y="198" fill="#8B97A9" font-family="Helvetica, Arial, sans-serif" font-size="13" letter-spacing="2">DISSANAYAKE &amp; ARMSTRONG  ·  2026  ·  NSW SAVING OUR SPECIES</text>
 
   <g transform="translate(1050 138)">
     <rect x="-66" y="-58" width="6" height="106" fill="#3D4A5C" opacity="0.55"/>
