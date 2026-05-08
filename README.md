@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="FoxWatch — Bayesian Fox Abundance Estimation from Camera-Trap Data" width="100%"/>
+</p>
+
 # FoxWatch
 
 **A User-Friendly Tool for Estimating Fox Abundance from Camera Traps Using Simultaneous-Count Models**
@@ -37,6 +41,8 @@ Foxwatch/
 │       └── park_boundary/      # Oolambeyan National Park shapefile
 ├── docs/                       # Supplementary documentation
 │   └── Guide walks you through installing FoxWatch_SupplementaryFile_*.pdf
+├── assets/
+│   └── banner.svg              # Project banner used in this README
 ├── README.md
 ├── LICENSE                     # MIT
 ├── CITATION.cff                # Citation metadata
