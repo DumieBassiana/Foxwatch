@@ -6,7 +6,7 @@
 
 **A User-Friendly Tool for Estimating Fox Abundance from Camera Traps Using Simultaneous-Count Models**
 
-Version 1.5 • Authors: Duminda S.B. Dissanayake & Graeme Armstrong • 2026
+Version 1.1 • Authors: Duminda S.B. Dissanayake & Graeme Armstrong • 2026
 Programme: NSW Saving Our Species
 
 ---
