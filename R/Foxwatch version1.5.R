@@ -12,14 +12,14 @@
 # =============================================================================
 #  Title   : FoxWatch — A User-Friendly Tool for Estimating Fox Abundance
 #            from Camera Traps Using Simultaneous-Count Models
-#  Version : 1.1
+#  Version : 1.5
 #  Authors : Duminda S.B. Dissanayake & Graeme Armstrong
 #  Year    : 2026
 #  Contact : dumie.dissanayake@dcceew.nsw.gov.au
 # -----------------------------------------------------------------------------
 #  Programme    : NSW Saving Our Species
 #  Paper        : <DOI link when available>
-#  Repository   : <GitHub URL>
+#  Repository   : https://github.com/DumieBassiana/Foxwatch
 # -----------------------------------------------------------------------------
 #  Description:
 #    FoxWatch is an R Shiny application that enables field ecologists and
@@ -30,9 +30,16 @@
 #    Key features:
 #      • Automated EXIF metadata parsing from camera-trap text files
 #      • Interactive spatial visualisation of fox detections per site per year
-#      • Bayesian SCM fitted via JAGS with two-chain MCMC sampling
-#      • Gelman-Rubin convergence diagnostics (R-hat) per 10-day block
-#      • Colour-coded results table and uncertainty ribbon plots
+#      • Bayesian effort-scaled Simultaneous-Count Model (SCM) fitted via
+#        JAGS. Detection probability per replicate scales with survey effort
+#        via p_eff = 1 - (1 - p)^effort, and all N[i] share a common Gamma
+#        prior on lambda, so blocks with sparse data borrow strength from the
+#        others (partial pooling). Default priors Beta(1, 19) on p and
+#        Gamma(2, 0.25) on lambda encode a rare-detection, low-abundance
+#        regime; all priors and MCMC settings are user-adjustable in the UI.
+#      • Gelman-Rubin R-hat, effective sample size (ESS) and Monte-Carlo
+#        standard error (MCSE) reported for every parameter
+#      • Colour-coded results tables and uncertainty ribbon plots
 #      • One-click CSV export of all abundance estimates
 # -----------------------------------------------------------------------------
 #  Dependencies:
@@ -109,7 +116,7 @@ read_vector_layer <- function(upload) {
   req(upload)
   vdir <- file.path(tempdir(), paste0("v_", as.integer(runif(1, 1e9))))
   dir.create(vdir, showWarnings = FALSE, recursive = TRUE)
-  
+
   zip_idx <- grepl("\\.zip$", upload$name, ignore.case = TRUE)
   if (any(zip_idx)) {
     zpath    <- upload$datapath[which(zip_idx)[1]]
@@ -135,14 +142,14 @@ read_vector_layer <- function(upload) {
 # UI
 # ---------------------------------------------------------------------------
 ui <- fluidPage(
-  
+
   tags$head(
     # Google Fonts
     tags$link(
       rel  = "stylesheet",
       href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Montserrat:wght@700;800&display=swap"
     ),
-    
+
     tags$style(HTML("
 
       /* ── Base ─────────────────────────────────────────────────── */
@@ -464,7 +471,7 @@ ui <- fluidPage(
 
     "))
   ),
-  
+
   # ── BANNER ──────────────────────────────────────────────────────────────
   div(class = "fw-banner",
       div(class = "fw-title",
@@ -478,12 +485,12 @@ ui <- fluidPage(
                HTML("&#x25C6; Version 1.1"))
       )
   ),
-  
+
   sidebarLayout(
     sidebarPanel(
       width = 3,
       div(class = "sidebar-title", "Data Upload"),
-      
+
       # Spatial Data
       div(class = "upload-card",
           div(class = "upload-card-title",
@@ -496,7 +503,7 @@ ui <- fluidPage(
                     multiple = TRUE,
                     accept   = c(".shp", ".shx", ".dbf", ".prj", ".zip"))
       ),
-      
+
       # Camera Data
       div(class = "upload-card",
           div(class = "upload-card-title",
@@ -506,24 +513,25 @@ ui <- fluidPage(
                     accept   = ".txt"),
           helpText("Multiple files can be selected")
       ),
-      
+
       # Abundance Data
       div(class = "upload-card",
           div(class = "upload-card-title",
               icon("chart-line"), " Abundance Data"),
-          fileInput("abundance_csv", "Daily Detection Counts (TXT)",
-                    accept = ".txt"),
-          helpText("One integer count per line")
+          fileInput("abundance_csv",
+                    "Daily Counts (TXT) or Fox Detections (CSV)",
+                    accept = c(".txt", ".csv")),
+          helpText("TXT: one integer count per line. CSV: SiteID, Date, Time, Detection")
       )
     ),
-    
+
     mainPanel(
       width = 9,
-      
+
       tabsetPanel(
         id   = "main_tabs",
         type = "tabs",
-        
+
         # ── TAB 1: Spatial Analysis ────────────────────────────────────
         tabPanel(
           title = tagList(icon("map-marked-alt"), " Spatial Analysis"),
@@ -552,7 +560,7 @@ ui <- fluidPage(
                              class = "btn btn-primary")
           )
         ),
-        
+
         # ── TAB 2: Camera Data & Detection ────────────────────────────
         tabPanel(
           title = tagList(icon("camera-retro"), " Camera Data & Detection"),
@@ -602,7 +610,7 @@ ui <- fluidPage(
                 camera-presence counts ready for the Abundance Model tab.
                 For each day, FoxWatch counts the number of camera stations
                 that detected at least one fox, fills days with no detections
-                as zero, and outputs one integer per line \u2014 the exact
+                as zero, and outputs one integer per line — the exact
                 format required by the SCM."),
               div(style = "text-align: center;",
                   actionButton("generate_daily_counts",
@@ -618,80 +626,181 @@ ui <- fluidPage(
               uiOutput("daily_counts_preview")
           )
         ),
-        
-        # ── TAB 3: Fox Abundance Model ─────────────────────────────────
+
+        # -- TAB 3: Fox Abundance Model ----------------------------------
         tabPanel(
-          title = tagList(icon("chart-line"), " Fox Abundance Model"),
+          title = tagList(icon("chart-line"),
+                          " Fox Abundance Model"),
           br(),
           div(class = "section-card",
-              h3(icon("calculator"), " Fox Abundance Estimation"),
+              style = "border-left: 4px solid #0d5c8a;",
+              h3(icon("sliders-h"),
+                 " Fox Abundance Model - Effort-Scaled SCM with Partial Pooling"),
               br(),
               p(style = "font-size:14px; color:#4a5568;",
-                "FoxWatch fits a Bayesian Simultaneous-Count Model (SCM;
-                Armstrong & McSorley 2024) to daily fox detection counts.
-                Two independent MCMC chains are run per 10-day block;
-                Gelman-Rubin R-hat statistics are computed automatically
-                to assess convergence."),
+                "FoxWatch fits a Bayesian Simultaneous-Count Model (SCM; Armstrong &
+                McSorley 2024) to your daily fox detection counts. Per-visit
+                detection probability scales with survey effort via the
+                geometric-complement link ",
+                tags$em("p_eff = 1 - (1 - p)^effort"),
+                " -- i.e. if the daily detection probability is p, then
+                over k trap-nights the probability of at least one detection
+                is 1 - (1 - p)^k. All occasions are fitted jointly and
+                share a common Poisson mean lambda, so blocks with sparse
+                data borrow strength from the others (partial pooling).
+                Default priors Beta(1, 19) on p (mean ~ 0.05) and
+                Gamma(2, 0.25) on lambda (mean 8) encode a rare-detection,
+                low-abundance regime. All priors and MCMC settings below
+                are user-adjustable."),
               hr(),
-              actionButton("run_abundance_model",
-                           label = tagList(icon("play-circle"),
-                                           " Run Abundance Model"),
-                           class = "btn btn-success btn-lg"),
-              br(), br(),
-              div(class = "convergence-legend",
-                  tags$strong("Convergence key \u2014 Gelman-Rubin R-hat:"),
-                  tags$ul(
-                    tags$li(HTML(
-                      "<span style='background:#d4edda; padding:2px 10px;
-                       border-radius:4px; font-size:13px;'>
-                       <strong>Good</strong> (&le; 1.05) \u2014
-                       chains agree; estimate reliable</span>"
-                    )),
-                    tags$li(HTML(
-                      "<span style='background:#fff3cd; padding:2px 10px;
-                       border-radius:4px; font-size:13px;'>
-                       <strong>Acceptable</strong> (1.05 &ndash; 1.10) \u2014
-                       minor discrepancy; use with caution</span>"
-                    )),
-                    tags$li(HTML(
-                      "<span style='background:#f8d7da; padding:2px 10px;
-                       border-radius:4px; font-size:13px;'>
-                       <strong>Poor</strong> (&gt; 1.10) \u2014
-                       treat estimate with caution; check for sparse
-                       detection counts in that period</span>"
-                    ))
-                  )
+              h4(icon("bezier-curve"), " Prior hyperparameters"),
+              fluidRow(
+                column(3, numericInput("mb_pa",
+                                       "Beta prior alpha on p",
+                                       value = 1, min = 0.01, step = 0.1)),
+                column(3, numericInput("mb_pb",
+                                       "Beta prior beta on p",
+                                       value = 19, min = 0.01, step = 0.5)),
+                column(3, numericInput("mb_shape",
+                                       "Gamma shape on lambda",
+                                       value = 2, min = 0.01, step = 0.1)),
+                column(3, numericInput("mb_rate",
+                                       "Gamma rate on lambda",
+                                       value = 0.25, min = 0.001,
+                                       step = 0.05))
               ),
-              br(),
-              withSpinner(DTOutput("abundance_preview"), color = "#e67e22")
+              hr(),
+              h4(icon("random"), " MCMC settings"),
+              fluidRow(
+                column(2, numericInput("mb_chains", "Chains",
+                                       value = 3, min = 1, max = 8,
+                                       step = 1)),
+                column(2, numericInput("mb_adapt", "Adapt",
+                                       value = 1000, min = 100,
+                                       step = 100)),
+                column(3, numericInput("mb_burnin", "Burn-in",
+                                       value = 5000, min = 500,
+                                       step = 500)),
+                column(3, numericInput("mb_iter", "Samples",
+                                       value = 10000, min = 1000,
+                                       step = 1000)),
+                column(2, numericInput("mb_thin", "Thin",
+                                       value = 1, min = 1, step = 1))
+              ),
+              hr(),
+              h4(icon("video"), " Camera array size"),
+              fluidRow(
+                column(4, numericInput("mb_n_cameras",
+                                       "Number of active camera stations",
+                                       value = 15, min = 1, step = 1)),
+                column(8,
+                       helpText("Total number of cameras deployed across the array. Used for a data-quality warning (if any daily count exceeds this number, the app flags it as a probable data-entry issue) and for a derived foxes-per-camera metric shown alongside the abundance table. Does not enter the JAGS likelihood."))
+              ),
+              hr(),
+              h4(icon("clock"), " Effort matrix (optional)"),
+              fileInput("mb_effort_csv",
+                        "Effort CSV (rows = occasions, cols = replicates)",
+                        accept = ".csv"),
+              helpText("If omitted, effort = 1 for every cell (equivalent to
+                        one trap-night per replicate). Provide a CSV with no
+                        header, one row per 10-day block, one column per day
+                        (10 columns), where each value is the number of
+                        active trap-nights that day."),
+              hr(),
+              div(style = "text-align: center;",
+                  actionButton("run_model_b",
+                               label = tagList(icon("play-circle"),
+                                               " Run Abundance Model"),
+                               class = "btn btn-success btn-lg"))
           ),
           br(),
           div(class = "section-card",
-              h3(icon("chart-area"), " Abundance Visualisation"),
-              withSpinner(plotlyOutput("abundance_plot", height = "580px"),
-                          color = "#e67e22"),
+              style = "border-left: 4px solid #27ae60;",
+              h3(icon("balance-scale"),
+                 " Study-wide Summary"),
+              withSpinner(uiOutput("mb_summary_text"),
+                          color = "#27ae60")
+          ),
+          br(),
+          div(class = "section-card",
+              h3(icon("table"),
+                 " Per-Occasion Abundance Estimates (N[i])"),
+              withSpinner(DTOutput("mb_N_table"), color = "#0d5c8a")
+          ),
+          br(),
+          div(class = "section-card",
+              h3(icon("cogs"), " Global Parameters (lambda, p)"),
+              withSpinner(DTOutput("mb_param_table"), color = "#0d5c8a")
+          ),
+          br(),
+          div(class = "section-card",
+              h3(icon("stethoscope"),
+                 " Convergence Diagnostics (R-hat, ESS, MCSE)"),
+              p(style = "font-size:13px; color:#4a5568;",
+                "R-hat colour key: green <= 1.05 (good),
+                amber 1.05-1.10 (acceptable), red > 1.10 (poor
+                -- treat that parameter with caution)."),
+              withSpinner(DTOutput("mb_diag_table"), color = "#0d5c8a")
+          ),
+          br(),
+          div(class = "section-card",
+              h3(icon("chart-area"),
+                 " Posterior Mode Abundance with 95% HDI"),
+              withSpinner(plotlyOutput("mb_mode_plot",
+                                       height = "500px"),
+                          color = "#0d5c8a"),
               br(),
-              div(style = "display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;",
-                  downloadButton("download_abundance_data",
-                                 label = tagList(icon("file-csv"),
-                                                 " Download Abundance Estimates (CSV)"),
+              div(style = "text-align:right;",
+                  tags$small(style = "color:#718096; margin-right:8px;",
+                             "Publication-quality export:"),
+                  downloadButton("mb_download_mode_png",
+                                 label = tagList(icon("image"),
+                                                 " PNG (300 dpi)"),
                                  class = "btn btn-primary"),
-                  div(
-                    tags$small(style = "color:#718096; margin-right:8px;",
-                               "Publication-quality export:"),
-                    downloadButton("download_abundance_png",
-                                   label = tagList(icon("image"), " PNG (300 dpi)"),
-                                   class = "btn btn-primary"),
-                    span(" "),
-                    downloadButton("download_abundance_pdf",
-                                   label = tagList(icon("file-pdf"), " PDF"),
-                                   class = "btn btn-primary")
-                  )
-              )
+                  span(" "),
+                  downloadButton("mb_download_mode_pdf",
+                                 label = tagList(icon("file-pdf"),
+                                                 " PDF"),
+                                 class = "btn btn-primary"))
+          ),
+          br(),
+          div(class = "section-card",
+              h3(icon("chart-area"),
+                 " Posterior Mean Abundance with 95% HDI"),
+              withSpinner(plotlyOutput("mb_mean_plot",
+                                       height = "500px"),
+                          color = "#0d5c8a"),
+              br(),
+              div(style = "text-align:right;",
+                  tags$small(style = "color:#718096; margin-right:8px;",
+                             "Publication-quality export:"),
+                  downloadButton("mb_download_mean_png",
+                                 label = tagList(icon("image"),
+                                                 " PNG (300 dpi)"),
+                                 class = "btn btn-primary"),
+                  span(" "),
+                  downloadButton("mb_download_mean_pdf",
+                                 label = tagList(icon("file-pdf"),
+                                                 " PDF"),
+                                 class = "btn btn-primary"))
+          ),
+          br(),
+          div(class = "section-card",
+              h3(icon("download"), " Export Results"),
+              div(style = "text-align: center;",
+                  downloadButton("mb_download_csv",
+                                 label = tagList(icon("file-csv"),
+                                                 " Download Estimates (CSV)"),
+                                 class = "btn btn-primary"),
+                  span("  "),
+                  downloadButton("mb_download_params_csv",
+                                 label = tagList(icon("file-csv"),
+                                                 " Download lambda, p Table (CSV)"),
+                                 class = "btn btn-primary"))
           )
         )
       ),
-      
+
       # ── FOOTER ──────────────────────────────────────────────────────
       div(class = "fw-footer",
           actionButton(
@@ -712,16 +821,15 @@ ui <- fluidPage(
 )
 
 # ---------------------------------------------------------------------------
-# Server  (unchanged from v1.0 — all logic identical)
+# Server
 # ---------------------------------------------------------------------------
 server <- function(input, output, session) {
-  
+
   camera_files      <- reactiveValues(files = list(), cleaned = list())
   master_detections <- reactiveVal(data.frame())
   summary_table_rv  <- reactiveVal(data.frame())
-  abundance_results <- reactiveVal()
   map_plot_obj      <- reactiveVal(NULL)
-  
+
   # ── Camera file upload ────────────────────────────────────────────────
   observeEvent(input$txtfiles, {
     req(input$txtfiles)
@@ -737,7 +845,7 @@ server <- function(input, output, session) {
     showNotification(paste("Loaded", nrow(input$txtfiles), "camera file(s)"),
                      type = "message", duration = 3)
   })
-  
+
   # ── Camera tabs UI ────────────────────────────────────────────────────
   output$camera_tabs <- renderUI({
     req(camera_files$files)
@@ -761,42 +869,42 @@ server <- function(input, output, session) {
     })
     do.call(tabsetPanel, c(tabs, id = "camera_tabset"))
   })
-  
+
   # ── Camera processing ─────────────────────────────────────────────────
   observe({
     lapply(names(camera_files$files), function(camera_id) {
-      
+
       output[[paste0("table_", camera_id)]] <- renderDT({
         req(camera_files$files[[camera_id]])
         lines <- read_lines(camera_files$files[[camera_id]]$path)
         df    <- parse_exif_lines(lines)
         datatable(df, options = list(pageLength = 10, scrollX = TRUE))
       })
-      
+
       observeEvent(input[[paste0("process_", camera_id)]], {
         lines <- read_lines(camera_files$files[[camera_id]]$path)
         df    <- parse_exif_lines(lines)
         df$SiteID <- camera_id
         df <- df %>% select(SiteID, Date, Time, Detection, Image_ID)
         colnames(df)[colnames(df) == "Image_ID"] <- "Image.ID"
-        
+
         cleaned_file <- file.path(tempdir(), paste0(camera_id, ".txt"))
         write_tsv(df, cleaned_file, quote = "all")
         camera_files$cleaned[[camera_id]] <- list(data = df,
                                                   file = cleaned_file)
         current <- master_detections()
         master_detections(bind_rows(current, df))
-        
+
         showNotification(paste("Processed", camera_id, "successfully"),
                          type = "message", duration = 3)
-        
+
         latest_summary <- master_detections() %>%
           filter(Detection == "Fox") %>%
           group_by(SiteID, Detection) %>%
           summarise(Total = n(), .groups = "drop")
         summary_table_rv(latest_summary)
       })
-      
+
       output[[paste0("download_", camera_id)]] <- downloadHandler(
         filename = function() paste0(camera_id, ".txt"),
         content  = function(file) {
@@ -806,7 +914,7 @@ server <- function(input, output, session) {
       )
     })
   })
-  
+
   # ── Summary table ─────────────────────────────────────────────────────
   output$summary_table <- renderDT({
     df <- summary_table_rv()
@@ -817,7 +925,7 @@ server <- function(input, output, session) {
         Message = "Process camera files to see summary"))
     }
   })
-  
+
   # ── Detection plot ─────────────────────────────────────────────────────
   output$detection_plot <- renderPlotly({
     df <- master_detections()
@@ -838,7 +946,7 @@ server <- function(input, output, session) {
       )
     ggplotly(p)
   })
-  
+
   # ── Fox download ──────────────────────────────────────────────────────
   output$download_fox_only <- downloadHandler(
     filename = function() paste0("Fox_Detections_", Sys.Date(), ".txt"),
@@ -848,55 +956,55 @@ server <- function(input, output, session) {
                   file, sep = "\t", row.names = FALSE, quote = FALSE)
     }
   )
-  
+
   # ── Daily counts reactive ─────────────────────────────────────────────
   daily_counts_rv <- reactiveVal(NULL)
-  
+
   # ── Generate daily camera-presence counts ─────────────────────────────
   observeEvent(input$generate_daily_counts, {
     df <- master_detections()
-    
+
     if (is.null(df) || nrow(df) == 0) {
       showNotification(
         "No processed detections found. Please process camera files first.",
         type = "error", duration = 5)
       return()
     }
-    
+
     df <- df %>%
       filter(Detection == "Fox") %>%
       mutate(Date_parsed = suppressWarnings(lubridate::dmy(Date))) %>%
       filter(!is.na(Date_parsed))
-    
+
     if (nrow(df) == 0) {
       showNotification("No valid fox detections found after parsing dates.",
                        type = "error", duration = 5)
       return()
     }
-    
+
     # Full date sequence from first to last detection
     date_range <- seq(min(df$Date_parsed), max(df$Date_parsed), by = "day")
-    
+
     # For each day: count unique cameras with >= 1 fox detection (binary per camera)
     daily <- df %>%
       group_by(Date_parsed) %>%
       summarise(Count = n_distinct(SiteID), .groups = "drop")
-    
+
     # Fill missing days with zero
     daily_full <- data.frame(Date_parsed = date_range) %>%
       left_join(daily, by = "Date_parsed") %>%
       mutate(Count = tidyr::replace_na(Count, 0L)) %>%
       arrange(Date_parsed)
-    
+
     daily_counts_rv(daily_full)
-    
+
     showNotification(
       paste0("Generated ", nrow(daily_full), " daily counts across ",
              length(unique(df$SiteID)), " camera stations. ",
              "Download the file and upload it to the Abundance Model tab."),
       type = "message", duration = 8)
   })
-  
+
   # ── Daily counts preview UI ───────────────────────────────────────────
   output$daily_counts_preview <- renderUI({
     df <- daily_counts_rv()
@@ -905,7 +1013,7 @@ server <- function(input, output, session) {
       hr(),
       p(style = "font-size:13px; color:#4a5568;",
         strong(paste0(nrow(df), " daily values generated")),
-        paste0(" \u2014 date range: ",
+        paste0(" — date range: ",
                format(min(df$Date_parsed), "%d/%m/%Y"),
                " to ",
                format(max(df$Date_parsed), "%d/%m/%Y"),
@@ -916,7 +1024,7 @@ server <- function(input, output, session) {
       DTOutput("daily_counts_table")
     )
   })
-  
+
   output$daily_counts_table <- renderDT({
     df <- daily_counts_rv()
     if (is.null(df)) return(NULL)
@@ -933,7 +1041,7 @@ server <- function(input, output, session) {
                   backgroundRepeat = "no-repeat",
                   backgroundPosition = "center")
   })
-  
+
   # ── Download daily counts for model ──────────────────────────────────
   output$download_daily_counts <- downloadHandler(
     filename = function()
@@ -947,200 +1055,7 @@ server <- function(input, output, session) {
       writeLines(as.character(df$Count), file)
     }
   )
-  
-  # ── Abundance model ───────────────────────────────────────────────────
-  observeEvent(input$run_abundance_model, {
-    req(input$abundance_csv)
-    
-    withProgress(message = "Running fox abundance model...", value = 0.1, {
-      
-      counts <- read_lines(input$abundance_csv$datapath)
-      counts <- as.numeric(counts)
-      counts <- counts[!is.na(counts)]
-      
-      if (length(counts) < 10) {
-        showNotification("Need at least 10 daily counts", type = "error")
-        return()
-      }
-      
-      usable_length <- floor(length(counts) / 10) * 10
-      detection_vec <- counts[1:usable_length]
-      days          <- matrix(detection_vec, nrow = 10)
-      
-      incProgress(0.2, detail = "Building Bayesian SCM...")
-      
-      modelString <- "
-      model {
-        for (i in 1:length(y)) {
-          y[i] ~ dbin(p, N)
-        }
-        p      ~ dbeta(2, 2)
-        N      ~ dpois(lambda)
-        lambda ~ dgamma(2, 0.05)
-      }"
-      writeLines(modelString, con = "model.txt")
-      
-      incProgress(0.4, detail = "Running MCMC chains...")
-      
-      jagsModel <- lapply(1:ncol(days), function(a) {
-        y <- days[, a]
-        jags.model(
-          file     = "model.txt",
-          data     = list(y = y),
-          inits    = list(
-            list(lambda = 100, p = 0.5),
-            list(lambda = 50,  p = 0.3)
-          ),
-          n.chains = 2,
-          n.adapt  = 1000,
-          quiet    = TRUE
-        )
-      })
-      
-      incProgress(0.6, detail = "Sampling from posterior...")
-      
-      codaSamples <- lapply(jagsModel, function(mod) {
-        update(mod, 2000, progress.bar = "none")
-        coda.samples(mod,
-                     variable.names = c("N", "p"),
-                     n.iter         = 10000,
-                     progress.bar   = "none")
-      })
-      
-      incProgress(0.8, detail = "Summarising results and checking convergence...")
-      
-      modN <- sapply(codaSamples, function(samp) {
-        modeest::mlv(as.vector(as.matrix(samp)[, "N"]), method = "mfv")[[1]]
-      })
-      upperhdi <- sapply(codaSamples, function(samp) {
-        HPDinterval(mcmc(as.vector(as.matrix(samp)[, "N"])))[1, 2]
-      })
-      lowerhdi <- sapply(codaSamples, function(samp) {
-        HPDinterval(mcmc(as.vector(as.matrix(samp)[, "N"])))[1, 1]
-      })
-      rhat_N <- sapply(codaSamples, function(samp) {
-        tryCatch({
-          coda::gelman.diag(samp)$psrf["N", "Point est."]
-        }, error = function(e) NA_real_)
-      })
-      converged <- dplyr::case_when(
-        is.na(rhat_N)  ~ "Unknown",
-        rhat_N <= 1.05 ~ "Good",
-        rhat_N <= 1.10 ~ "Acceptable",
-        TRUE           ~ "Poor"
-      )
-      
-      incProgress(0.9, detail = "Finalising...")
-      
-      abundance_results(data.frame(
-        Period      = 1:length(modN),
-        Abundance   = modN,
-        LowerHDI    = lowerhdi,
-        UpperHDI    = upperhdi,
-        Rhat        = round(rhat_N, 3),
-        Convergence = converged
-      ))
-      
-      incProgress(1, detail = "Complete!")
-    })
-    
-    showNotification("Abundance model completed successfully.",
-                     type    = "message",
-                     duration = 5)
-    
-    res    <- abundance_results()
-    n_poor <- sum(res$Convergence == "Poor", na.rm = TRUE)
-    if (n_poor > 0) {
-      showNotification(
-        paste0(n_poor, " block(s) showed poor MCMC convergence (R-hat > 1.10). ",
-               "Abundance estimates for those periods should be treated with ",
-               "caution. Review detection data for sparse or zero counts."),
-        type     = "warning",
-        duration = 12
-      )
-    }
-  })
-  
-  # ── Abundance preview table ───────────────────────────────────────────
-  output$abundance_preview <- renderDT({
-    df <- abundance_results()
-    if (is.null(df) || nrow(df) == 0) {
-      return(datatable(
-        data.frame(Message = "Run the model to see abundance estimates"),
-        options = list(dom = "t")
-      ))
-    }
-    datatable(
-      head(df, 10),
-      options  = list(pageLength = 10, dom = "t", scrollX = TRUE),
-      rownames = FALSE
-    ) %>%
-      formatStyle(
-        "Convergence",
-        backgroundColor = styleEqual(
-          c("Good",    "Acceptable", "Poor",    "Unknown"),
-          c("#d4edda", "#fff3cd",    "#f8d7da", "#e2e3e5")
-        )
-      ) %>%
-      formatRound(columns = c("Abundance", "LowerHDI", "UpperHDI", "Rhat"),
-                  digits  = 2)
-  })
-  
-  # ── Abundance plot ────────────────────────────────────────────────────
-  output$abundance_plot <- renderPlotly({
-    df <- abundance_results()
-    if (is.null(df) || nrow(df) == 0) return(plotly_empty())
-    
-    df$DayNumber <- df$Period * 10
-    conv_colours <- c(
-      "Good"       = "#27ae60",
-      "Acceptable" = "#f39c12",
-      "Poor"       = "#e74c3c",
-      "Unknown"    = "#95a5a6"
-    )
-    
-    p <- ggplot(df, aes(x = DayNumber)) +
-      geom_ribbon(aes(ymin = LowerHDI, ymax = UpperHDI),
-                  fill = "#aed6f1", alpha = 0.35) +
-      geom_line(aes(y = UpperHDI),
-                color = "#7fb3d3", linetype = "dashed", linewidth = 0.5) +
-      geom_line(aes(y = LowerHDI),
-                color = "#7fb3d3", linetype = "dashed", linewidth = 0.5) +
-      geom_smooth(aes(y = Abundance),
-                  method = "loess", se = FALSE,
-                  color = "#1b3a5c", linewidth = 1.2, span = 0.2) +
-      geom_point(aes(y = Abundance, colour = Convergence), size = 3) +
-      scale_colour_manual(
-        name   = "Convergence\n(R-hat)",
-        values = conv_colours
-      ) +
-      labs(
-        title = "Fox Abundance — 10-Day Sampling Periods",
-        x     = "Day",
-        y     = "Estimated Abundance (N)"
-      ) +
-      scale_x_continuous(breaks = seq(0, max(df$DayNumber), by = 50)) +
-      theme_minimal(base_family = "sans") +
-      theme(
-        plot.title   = element_text(face = "bold", size = 15,
-                                    hjust = 0.5, color = "#0d1b2a"),
-        axis.title   = element_text(face = "bold", size = 12),
-        axis.text.x  = element_text(size = 10, angle = 45, hjust = 1),
-        axis.text.y  = element_text(size = 11),
-        legend.title = element_text(size = 11, face = "bold"),
-        panel.grid.minor = element_blank()
-      )
-    ggplotly(p)
-  })
-  
-  # ── Abundance download ─────────────────────────────────────────────────
-  output$download_abundance_data <- downloadHandler(
-    filename = function()
-      paste0("FoxWatch_Abundance_", Sys.Date(), ".csv"),
-    content = function(file)
-      write.csv(abundance_results(), file, row.names = FALSE)
-  )
-  
+
   # ── High-resolution detection plot exports ───────────────────────────
   # Shared ggplot2 builder for static export (mirrors renderPlotly logic)
   detection_ggplot <- reactive({
@@ -1161,7 +1076,7 @@ server <- function(input, output, session) {
         panel.grid.major.x = element_blank()
       )
   })
-  
+
   output$download_detection_png <- downloadHandler(
     filename = function()
       paste0("FoxWatch_Detections_", Sys.Date(), ".png"),
@@ -1174,7 +1089,7 @@ server <- function(input, output, session) {
                       bg = "white")
     }
   )
-  
+
   output$download_detection_pdf <- downloadHandler(
     filename = function()
       paste0("FoxWatch_Detections_", Sys.Date(), ".pdf"),
@@ -1186,81 +1101,735 @@ server <- function(input, output, session) {
                       device = "pdf", units = "in")
     }
   )
-  
-  # ── High-resolution abundance plot exports ────────────────────────────
-  abundance_ggplot <- reactive({
-    df <- abundance_results()
-    req(!is.null(df) && nrow(df) > 0)
-    df$DayNumber <- df$Period * 10
-    conv_colours <- c(
-      "Good"       = "#27ae60",
-      "Acceptable" = "#f39c12",
-      "Poor"       = "#e74c3c",
-      "Unknown"    = "#95a5a6"
-    )
-    ggplot(df, aes(x = DayNumber)) +
-      geom_ribbon(aes(ymin = LowerHDI, ymax = UpperHDI),
-                  fill = "#aed6f1", alpha = 0.35) +
-      geom_line(aes(y = UpperHDI),
-                color = "#7fb3d3", linetype = "dashed", linewidth = 0.5) +
-      geom_line(aes(y = LowerHDI),
-                color = "#7fb3d3", linetype = "dashed", linewidth = 0.5) +
-      geom_smooth(aes(y = Abundance),
-                  method = "loess", se = FALSE,
-                  color = "#1b3a5c", linewidth = 1.2, span = 0.2) +
-      geom_point(aes(y = Abundance, colour = Convergence), size = 2.5) +
-      scale_colour_manual(
-        name   = "Convergence
-(R-hat)",
-        values = conv_colours
-      ) +
-      labs(
-        title = "Fox Abundance — 10-Day Sampling Periods",
-        x     = "Day",
-        y     = "Estimated Abundance (N)"
-      ) +
-      scale_x_continuous(breaks = seq(0, max(df$DayNumber), by = 50)) +
-      theme_minimal(base_size = 14) +
-      theme(
-        plot.title   = element_text(face = "bold", size = 16,
-                                    hjust = 0.5, color = "#0d1b2a"),
-        axis.title   = element_text(face = "bold", size = 13),
-        axis.text.x  = element_text(size = 11, angle = 45, hjust = 1),
-        axis.text.y  = element_text(size = 12),
-        legend.title = element_text(size = 12, face = "bold"),
-        panel.grid.minor = element_blank()
+
+  # =========================================================================
+  # -- Fox Abundance Model: effort-scaled SCM with partial pooling ------
+  # =========================================================================
+  #
+  # JAGS specification (built dynamically from the UI hyperparameter inputs):
+  #
+  #   p      ~ dbeta(mb_pa, mb_pb)          # default Beta(1, 19)
+  #   lambda ~ dgamma(mb_shape, mb_rate)    # default Gamma(2, 0.25)
+  #   for (i in 1:nOcc) {
+  #     N[i] ~ dpois(lambda)
+  #     for (j in 1:nRep) {
+  #       p_eff[i,j] <- 1 - (1 - p)^effort[i,j]
+  #       y[i,j]     ~ dbin(p_eff[i,j], N[i])
+  #     }
+  #   }
+  #
+  # Data reshaping: the same daily-counts vector uploaded on the sidebar is
+  # cut into 10-day blocks (matrix(counts, nrow = 10)), then transposed so
+  # each row is one occasion (10-day block) and each column is one day
+  # within that occasion. Effort matrix is user-uploaded (same dimensions)
+  # or defaulted to 1s.
+  # =========================================================================
+
+  model_b_rv <- reactiveValues(
+    N_summary     = NULL,
+    param_summary = NULL,
+    diag          = NULL,
+    n_occ         = 0L,
+    n_rep         = 0L,
+    start_date    = as.Date(NA),
+    n_cameras     = NA_integer_,
+    summary_text  = NULL
+  )
+
+  observeEvent(input$run_model_b, {
+    req(input$abundance_csv)
+
+    withProgress(message = "Running the abundance model...",
+                 value = 0.05, {
+
+      # Detect input file type: TXT = one integer per line;
+      # CSV = SiteID, Date, Time, Detection (as on the Spatial
+      # Analysis tab). When CSV, aggregate to daily unique-camera
+      # counts and record the first-day date so the plot can use
+      # a real date axis.
+      file_name  <- input$abundance_csv$name
+      is_csv     <- grepl("\\.csv$", file_name, ignore.case = TRUE)
+      start_date <- as.Date(NA)
+
+      if (is_csv) {
+        fox_df <- tryCatch(
+          readr::read_csv(input$abundance_csv$datapath,
+                          show_col_types = FALSE),
+          error = function(e) NULL
+        )
+        if (is.null(fox_df) || nrow(fox_df) == 0 ||
+            !all(c("SiteID", "Date", "Detection") %in% names(fox_df))) {
+          showNotification(
+            "CSV must have columns SiteID, Date, Detection.",
+            type = "error", duration = 6)
+          return()
+        }
+        fox_df <- fox_df %>%
+          dplyr::filter(Detection == "Fox") %>%
+          dplyr::mutate(Date = suppressWarnings(lubridate::dmy(Date))) %>%
+          dplyr::filter(!is.na(Date))
+        if (nrow(fox_df) == 0) {
+          showNotification(
+            "No valid Fox detections found in the uploaded CSV.",
+            type = "error", duration = 6)
+          return()
+        }
+        date_range <- seq(min(fox_df$Date), max(fox_df$Date), by = "day")
+        daily <- fox_df %>%
+          dplyr::group_by(Date) %>%
+          dplyr::summarise(Count = dplyr::n_distinct(SiteID),
+                           .groups = "drop")
+        daily_full <- data.frame(Date = date_range) %>%
+          dplyr::left_join(daily, by = "Date") %>%
+          dplyr::mutate(Count = tidyr::replace_na(Count, 0L)) %>%
+          dplyr::arrange(Date)
+        counts     <- daily_full$Count
+        start_date <- min(daily_full$Date)
+        showNotification(
+          paste0("CSV parsed: ", nrow(daily_full), " days from ",
+                 format(start_date, "%d %b %Y"), " to ",
+                 format(max(daily_full$Date), "%d %b %Y"),
+                 " across ", dplyr::n_distinct(fox_df$SiteID),
+                 " camera stations."),
+          type = "message", duration = 6)
+      } else {
+        counts <- read_lines(input$abundance_csv$datapath)
+        counts <- suppressWarnings(as.numeric(counts))
+        counts <- counts[!is.na(counts)]
+      }
+
+      if (length(counts) < 10) {
+        showNotification("Need at least 10 daily counts to fit the model.",
+                         type = "error", duration = 5)
+        return()
+      }
+
+      # -- Camera-array-size data-quality check (new in v1.5) --
+      n_cameras <- suppressWarnings(as.integer(input$mb_n_cameras))
+      if (is.na(n_cameras) || n_cameras < 1) n_cameras <- 1L
+      max_daily <- max(counts)
+      if (max_daily > n_cameras) {
+        showNotification(
+          paste0("Data-quality warning: the maximum daily count is ",
+                 max_daily, ", but you entered only ", n_cameras,
+                 " active camera(s). A daily count above the number of cameras usually indicates a data-entry issue (e.g. duplicated SiteID rows or wrong aggregation)."),
+          type = "warning", duration = 12)
+      }
+
+      usable_length <- floor(length(counts) / 10) * 10
+      detection_vec <- counts[1:usable_length]
+      days_mat      <- matrix(detection_vec, nrow = 10)
+      y_mat         <- t(days_mat)
+      n_occ         <- nrow(y_mat)
+      n_rep         <- ncol(y_mat)
+
+      incProgress(0.10, detail = "Loading effort matrix...")
+
+      effort_mat <- NULL
+      if (!is.null(input$mb_effort_csv)) {
+        effort_df <- tryCatch(
+          utils::read.csv(input$mb_effort_csv$datapath,
+                          header = FALSE, stringsAsFactors = FALSE),
+          error = function(e) NULL
+        )
+        if (!is.null(effort_df) &&
+            nrow(effort_df) == n_occ &&
+            ncol(effort_df) == n_rep) {
+          effort_mat <- as.matrix(effort_df)
+          storage.mode(effort_mat) <- "double"
+          if (any(!is.finite(effort_mat) | effort_mat < 0)) {
+            showNotification(
+              "Effort CSV contains non-finite or negative values; falling
+               back to effort = 1.",
+              type = "warning", duration = 6)
+            effort_mat <- NULL
+          }
+        } else {
+          showNotification(
+            paste0("Effort CSV dimensions (",
+                   ifelse(is.null(effort_df), "?", nrow(effort_df)), " x ",
+                   ifelse(is.null(effort_df), "?", ncol(effort_df)),
+                   ") do not match daily-count blocks (",
+                   n_occ, " x ", n_rep,
+                   "). Falling back to constant effort = 1."),
+            type = "warning", duration = 8)
+        }
+      }
+      if (is.null(effort_mat))
+        effort_mat <- matrix(1, nrow = n_occ, ncol = n_rep)
+
+      incProgress(0.20, detail = "Building JAGS model...")
+
+      modelString <- paste0(
+        "model {\n",
+        "  p      ~ dbeta(",  input$mb_pa,    ", ", input$mb_pb,   ")\n",
+        "  lambda ~ dgamma(", input$mb_shape, ", ", input$mb_rate, ")\n",
+        "  for (i in 1:nOcc) {\n",
+        "    N[i] ~ dpois(lambda)\n",
+        "    for (j in 1:nRep) {\n",
+        "      p_eff[i, j] <- 1 - pow(1 - p, effort[i, j])\n",
+        "      y[i, j]     ~ dbin(p_eff[i, j], N[i])\n",
+        "    }\n",
+        "  }\n",
+        "}\n"
+      )
+      writeLines(modelString, con = "model_b.txt")
+
+      dataList <- list(
+        y      = y_mat,
+        effort = effort_mat,
+        nOcc   = n_occ,
+        nRep   = n_rep
+      )
+
+      incProgress(0.35, detail = "Adapting MCMC...")
+
+      make_inits <- function(chain_idx) {
+        set.seed(42L + chain_idx)
+        list(
+          N      = apply(y_mat, 1, max) + sample(0:3, n_occ, replace = TRUE),
+          lambda = runif(1, min = 1,   max = 30),
+          p      = runif(1, min = 0.02, max = 0.30)
+        )
+      }
+      n_chains  <- max(1L, as.integer(input$mb_chains))
+      inits_lst <- lapply(seq_len(n_chains), make_inits)
+
+      jm <- tryCatch(
+        rjags::jags.model(
+          file     = "model_b.txt",
+          data     = dataList,
+          inits    = inits_lst,
+          n.chains = n_chains,
+          n.adapt  = as.integer(input$mb_adapt),
+          quiet    = TRUE
+        ),
+        error = function(e) {
+          showNotification(paste("Model failed to compile:", e$message),
+                           type = "error", duration = 8)
+          NULL
+        }
+      )
+      req(!is.null(jm))
+
+      incProgress(0.55, detail = "Burning in...")
+      update(jm, as.integer(input$mb_burnin), progress.bar = "none")
+
+      incProgress(0.75, detail = "Sampling from posterior...")
+      samples <- coda.samples(
+        jm,
+        variable.names = c("lambda", "p", "N"),
+        n.iter         = as.integer(input$mb_iter),
+        thin           = max(1L, as.integer(input$mb_thin)),
+        progress.bar   = "none"
+      )
+
+      incProgress(0.90, detail = "Summarising posterior...")
+
+      post   <- as.matrix(samples)
+      N_cols <- grep("^N\\[", colnames(post))
+
+      N_summary <- do.call(rbind, lapply(seq_along(N_cols), function(i) {
+        x   <- post[, N_cols[i]]
+        hpd <- coda::HPDinterval(coda::mcmc(x), prob = 0.95)
+        mode_est <- tryCatch(
+          as.numeric(modeest::mlv(x, method = "mfv")[[1]]),
+          error = function(e)
+            as.numeric(names(sort(table(x), decreasing = TRUE)[1]))
+        )
+        data.frame(
+          Occasion  = i,
+          DayNumber = i * 10L,
+          Mean      = mean(x),
+          Median    = as.numeric(median(x)),
+          Mode      = mode_est,
+          SD        = sd(x),
+          HDI_Lower = hpd[1, "lower"],
+          HDI_Upper = hpd[1, "upper"],
+          stringsAsFactors = FALSE
+        )
+      }))
+
+      hpd_lambda <- coda::HPDinterval(coda::mcmc(post[, "lambda"]),
+                                      prob = 0.95)
+      hpd_p      <- coda::HPDinterval(coda::mcmc(post[, "p"]),
+                                      prob = 0.95)
+      param_summary <- data.frame(
+        Parameter = c("lambda", "p"),
+        Mean      = c(mean(post[, "lambda"]),   mean(post[, "p"])),
+        Median    = c(median(post[, "lambda"]), median(post[, "p"])),
+        SD        = c(sd(post[, "lambda"]),     sd(post[, "p"])),
+        HDI_Lower = c(hpd_lambda[1, "lower"],   hpd_p[1, "lower"]),
+        HDI_Upper = c(hpd_lambda[1, "upper"],   hpd_p[1, "upper"]),
+        stringsAsFactors = FALSE
+      )
+
+      gelman_res <- tryCatch(
+        coda::gelman.diag(samples, multivariate = FALSE, autoburnin = FALSE),
+        error = function(e) NULL
+      )
+      rhat <- if (!is.null(gelman_res)) {
+        setNames(round(gelman_res$psrf[, "Point est."], 3),
+                 rownames(gelman_res$psrf))
+      } else {
+        setNames(rep(NA_real_, ncol(post)), colnames(post))
+      }
+      ess  <- round(as.numeric(coda::effectiveSize(samples)))
+      names(ess) <- colnames(post)
+      mcse <- apply(post, 2, function(x) sd(x) / sqrt(length(x)))
+
+      diag_df <- data.frame(
+        Parameter = colnames(post),
+        Rhat      = rhat[colnames(post)],
+        ESS       = ess[colnames(post)],
+        MCSE      = round(mcse, 4),
+        stringsAsFactors = FALSE
+      )
+
+      incProgress(1.00, detail = "Complete!")
+
+      # -- Attach per-occasion R-hat & convergence category --
+      # For each N[i], pull the R-hat computed above and classify.
+      n_rhat_names        <- paste0("N[", seq_along(N_cols), "]")
+      N_summary$Rhat_N    <- as.numeric(rhat[n_rhat_names])
+      N_summary$Convergence <- factor(
+        ifelse(is.na(N_summary$Rhat_N),        "Unknown",
+          ifelse(N_summary$Rhat_N <= 1.05,     "Good",
+            ifelse(N_summary$Rhat_N <= 1.10,   "Acceptable",
+                                               "Poor"))),
+        levels = c("Good", "Acceptable", "Poor", "Unknown")
+      )
+
+      # Attach real-date columns when we have a start_date
+      if (!is.na(start_date)) {
+        N_summary$BlockStart <- start_date +
+          (N_summary$Occasion - 1L) * 10L
+        N_summary$BlockEnd   <- start_date +
+          N_summary$Occasion * 10L - 1L
+        N_summary$BlockMid   <- start_date +
+          (N_summary$Occasion - 1L) * 10L + 4L
+      }
+
+      # -- Foxes-per-camera derived columns (new in v1.5) --
+      N_summary$FoxPerCamera_Mode <- round(N_summary$Mode / n_cameras, 3)
+      N_summary$FoxPerCamera_Mean <- round(N_summary$Mean / n_cameras, 3)
+
+      # -- Build the study-wide summary text (v1.5) --
+      mean_abundance <- round(mean(N_summary$Mode), 1)
+      fox_per_cam    <- round(mean_abundance / n_cameras, 2)
+      date_bit <- if (!is.na(start_date)) {
+        paste0(" over the period ",
+               format(start_date, "%d %b %Y"), " to ",
+               format(max(N_summary$BlockEnd), "%d %b %Y"))
+      } else { "" }
+      model_b_rv$summary_text <- HTML(paste0(
+        "<div style=\"padding:10px 14px; font-size:14px; color:#0d1b2a;\">",
+        "<strong>Camera array:</strong> ", n_cameras,
+        " active camera station(s).<br>",
+        "<strong>Fitted blocks:</strong> ", nrow(N_summary),
+        " ten-day occasion(s)", date_bit, ".<br>",
+        "<strong>Study-wide mean posterior mode:</strong> ",
+        mean_abundance, " foxes across the array &rarr; approximately ",
+        "<strong>", fox_per_cam, " foxes per camera</strong>.",
+        "</div>"
+      ))
+
+      model_b_rv$n_cameras     <- n_cameras
+      model_b_rv$N_summary     <- N_summary
+      model_b_rv$param_summary <- param_summary
+      model_b_rv$diag          <- diag_df
+      model_b_rv$n_occ         <- n_occ
+      model_b_rv$n_rep         <- n_rep
+      model_b_rv$start_date    <- start_date
+    })
+
+    showNotification(
+      paste0("Model completed: fitted ", model_b_rv$n_occ,
+             " occasions x ", model_b_rv$n_rep, " replicates."),
+      type = "message", duration = 6)
+
+    if (!is.null(model_b_rv$diag)) {
+      n_poor <- sum(model_b_rv$diag$Rhat > 1.10, na.rm = TRUE)
+      if (n_poor > 0) {
+        showNotification(
+          paste0(n_poor,
+                 " parameter(s) show poor MCMC convergence (R-hat > 1.10). ",
+                 "Consider increasing burn-in, samples, or number of chains."),
+          type = "warning", duration = 10)
+      }
+    }
+  })
+
+  # -- Model B: Study-wide summary text (new in v1.5) --
+  output$mb_summary_text <- renderUI({
+    txt <- model_b_rv$summary_text
+    if (is.null(txt)) {
+      return(HTML(paste0(
+        "<div style=\"padding:10px 14px; color:#4a5568; font-style:italic;\">",
+        "Run the model to see a study-wide summary.",
+        "</div>"
+      )))
+    }
+    txt
+  })
+
+  output$mb_N_table <- renderDT({
+    df <- model_b_rv$N_summary
+    if (is.null(df) || nrow(df) == 0) {
+      return(datatable(
+        data.frame(Message = "Run the model to see per-occasion estimates."),
+        options = list(dom = "t")
+      ))
+    }
+    datatable(
+      df,
+      options  = list(pageLength = 12, dom = "tp", scrollX = TRUE),
+      rownames = FALSE,
+      caption  = "N[i] posterior summaries -- one row per 10-day block."
+    ) %>%
+      formatRound(c("Mean", "Median", "Mode", "SD",
+                    "HDI_Lower", "HDI_Upper"), 2) %>%
+      formatRound(c("FoxPerCamera_Mode", "FoxPerCamera_Mean"), 3)
+  })
+
+  output$mb_param_table <- renderDT({
+    df <- model_b_rv$param_summary
+    if (is.null(df)) {
+      return(datatable(
+        data.frame(Message = "Run the model to see lambda, p estimates."),
+        options = list(dom = "t")
+      ))
+    }
+    datatable(
+      df,
+      options  = list(dom = "t"),
+      rownames = FALSE,
+      caption  = "Global parameters shared across all occasions."
+    ) %>%
+      formatRound(c("Mean", "Median", "SD",
+                    "HDI_Lower", "HDI_Upper"), 3)
+  })
+
+  output$mb_diag_table <- renderDT({
+    df <- model_b_rv$diag
+    if (is.null(df) || nrow(df) == 0) {
+      return(datatable(
+        data.frame(Message = "Run the model to see convergence diagnostics."),
+        options = list(dom = "t")
+      ))
+    }
+    datatable(
+      df,
+      options  = list(pageLength = 20, dom = "tp", scrollX = TRUE),
+      rownames = FALSE
+    ) %>%
+      formatRound("Rhat", 3) %>%
+      formatRound("MCSE", 4) %>%
+      formatStyle(
+        "Rhat",
+        backgroundColor = styleInterval(
+          c(1.05, 1.10),
+          c("#d4edda", "#fff3cd", "#f8d7da")
+        )
       )
   })
-  
-  output$download_abundance_png <- downloadHandler(
+
+  mb_mode_ggplot <- reactive({
+    df <- model_b_rv$N_summary
+    req(!is.null(df) && nrow(df) > 0)
+    use_dates   <- "BlockMid" %in% names(df)
+
+    # Palette for convergence traffic-light and plot backdrops
+    conv_cols <- c(
+      "Good"       = "#27AE60",
+      "Acceptable" = "#F39C12",
+      "Poor"       = "#E74C3C",
+      "Unknown"    = "#95A5A6"
+    )
+    ribbon_fill <- "#7EB6D9"
+    hdi_edge    <- "#2E5C82"
+    trend_col   <- "#0F2A44"   # LOESS trend line - dark navy
+
+    # LOESS span - tighter for long series, wider for short ones
+    span_use <- max(0.15, min(0.5, 30 / nrow(df)))
+
+    if (use_dates) {
+      p <- ggplot(df, aes(x = BlockMid, y = Mode)) +
+        geom_ribbon(aes(ymin = HDI_Lower, ymax = HDI_Upper),
+                    fill = ribbon_fill, alpha = 0.6) +
+        geom_line(aes(y = HDI_Lower), colour = hdi_edge,
+                  linetype = "22", linewidth = 0.55) +
+        geom_line(aes(y = HDI_Upper), colour = hdi_edge,
+                  linetype = "22", linewidth = 0.55) +
+        geom_smooth(method = "loess", span = span_use, se = FALSE,
+                    colour = trend_col, linewidth = 0.9) +
+        geom_point(aes(fill = Convergence, shape = Convergence),
+                   colour = trend_col, size = 2.2, stroke = 0.35) +
+        scale_x_date(date_labels = "%d %b %Y",
+                     date_breaks = if (nrow(df) > 12) "2 months" else "1 month") +
+        labs(x = "10-day block (midpoint date)")
+    } else {
+      n_occ    <- nrow(df)
+      mid_occ  <- ceiling(n_occ / 2)
+      brk_x    <- unique(c(1L, as.integer(mid_occ), as.integer(n_occ)))
+      lab_x    <- c("Start of\ndeployment", "Mid",
+                    "End of\ndeployment")[seq_along(brk_x)]
+      p <- ggplot(df, aes(x = Occasion, y = Mode)) +
+        geom_ribbon(aes(ymin = HDI_Lower, ymax = HDI_Upper),
+                    fill = ribbon_fill, alpha = 0.6) +
+        geom_line(aes(y = HDI_Lower), colour = hdi_edge,
+                  linetype = "22", linewidth = 0.55) +
+        geom_line(aes(y = HDI_Upper), colour = hdi_edge,
+                  linetype = "22", linewidth = 0.55) +
+        geom_smooth(method = "loess", span = span_use, se = FALSE,
+                    colour = trend_col, linewidth = 0.9) +
+        geom_point(aes(fill = Convergence, shape = Convergence),
+                   colour = trend_col, size = 2.2, stroke = 0.35) +
+        scale_x_continuous(breaks = brk_x, labels = lab_x,
+                           expand = expansion(mult = c(0.02, 0.02))) +
+        labs(x = NULL)
+    }
+    p +
+      scale_fill_manual(name   = "Convergence\n(R-hat)",
+                        values = conv_cols, drop = FALSE) +
+      scale_shape_manual(name  = "Convergence\n(R-hat)",
+                         values = c("Good"       = 21,
+                                    "Acceptable" = 22,
+                                    "Poor"       = 24,
+                                    "Unknown"    = 23),
+                         drop   = FALSE) +
+      # Force every convergence category to appear in the legend with a
+      # coloured symbol, even if the current data has no points at that level.
+      guides(
+        fill = guide_legend(
+          override.aes = list(
+            shape  = c(21, 22, 24, 23),
+            fill   = c("#27AE60", "#F39C12", "#E74C3C", "#95A5A6"),
+            colour = "#0F2A44",
+            size   = 3.2,
+            stroke = 0.4
+          )
+        ),
+        shape = "none"
+      ) +
+      scale_y_continuous(expand = expansion(mult = c(0.01, 0.05))) +
+      labs(
+        title    = "Posterior Mode Abundance",
+        subtitle = "Shaded band = 95% HDI (dashed edges); points coloured & shaped by R-hat convergence.",
+        y        = "Estimated Abundance (N)",
+        caption  = "FoxWatch — Bayesian SCM with effort-scaled p and shared λ"
+      ) +
+      theme_minimal(base_size = 14) +
+      theme(
+        plot.title         = element_text(face = "bold", hjust = 0.5,
+                                          colour = "#0d1b2a", size = 16),
+        plot.subtitle      = element_text(hjust = 0.5, colour = "#4a5568",
+                                          size = 11),
+        plot.caption       = element_text(hjust = 0.5, colour = "#7a8a9a",
+                                          size = 9, face = "italic"),
+        axis.title         = element_text(face = "bold", size = 13,
+                                          colour = "#0d1b2a"),
+        axis.text          = element_text(colour = "#0d1b2a"),
+        axis.text.x        = element_text(angle = if (use_dates) 45 else 0,
+                                          hjust = if (use_dates) 1 else 0.5,
+                                          lineheight = 0.9),
+        panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.35),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        plot.margin        = ggplot2::margin(15, 20, 12, 15),
+        legend.position    = "right",
+        legend.title       = element_text(face = "bold", size = 11),
+        legend.text        = element_text(size = 10)
+      )
+  })
+
+  mb_mean_ggplot <- reactive({
+    df <- model_b_rv$N_summary
+    req(!is.null(df) && nrow(df) > 0)
+    use_dates   <- "BlockMid" %in% names(df)
+
+    conv_cols <- c(
+      "Good"       = "#27AE60",
+      "Acceptable" = "#F39C12",
+      "Poor"       = "#E74C3C",
+      "Unknown"    = "#95A5A6"
+    )
+    ribbon_fill <- "#F3BE86"   # soft peach for mean plot
+    hdi_edge    <- "#C46A2E"
+    trend_col   <- "#0F2A44"   # dark navy (consistent with mode plot)
+
+    span_use <- max(0.15, min(0.5, 30 / nrow(df)))
+
+    if (use_dates) {
+      p <- ggplot(df, aes(x = BlockMid, y = Mean)) +
+        geom_ribbon(aes(ymin = HDI_Lower, ymax = HDI_Upper),
+                    fill = ribbon_fill, alpha = 0.6) +
+        geom_line(aes(y = HDI_Lower), colour = hdi_edge,
+                  linetype = "22", linewidth = 0.55) +
+        geom_line(aes(y = HDI_Upper), colour = hdi_edge,
+                  linetype = "22", linewidth = 0.55) +
+        geom_smooth(method = "loess", span = span_use, se = FALSE,
+                    colour = trend_col, linewidth = 0.9) +
+        geom_point(aes(fill = Convergence, shape = Convergence),
+                   colour = trend_col, size = 2.2, stroke = 0.35) +
+        scale_x_date(date_labels = "%d %b %Y",
+                     date_breaks = if (nrow(df) > 12) "2 months" else "1 month") +
+        labs(x = "10-day block (midpoint date)")
+    } else {
+      n_occ    <- nrow(df)
+      mid_occ  <- ceiling(n_occ / 2)
+      brk_x    <- unique(c(1L, as.integer(mid_occ), as.integer(n_occ)))
+      lab_x    <- c("Start of\ndeployment", "Mid",
+                    "End of\ndeployment")[seq_along(brk_x)]
+      p <- ggplot(df, aes(x = Occasion, y = Mean)) +
+        geom_ribbon(aes(ymin = HDI_Lower, ymax = HDI_Upper),
+                    fill = ribbon_fill, alpha = 0.6) +
+        geom_line(aes(y = HDI_Lower), colour = hdi_edge,
+                  linetype = "22", linewidth = 0.55) +
+        geom_line(aes(y = HDI_Upper), colour = hdi_edge,
+                  linetype = "22", linewidth = 0.55) +
+        geom_smooth(method = "loess", span = span_use, se = FALSE,
+                    colour = trend_col, linewidth = 0.9) +
+        geom_point(aes(fill = Convergence, shape = Convergence),
+                   colour = trend_col, size = 2.2, stroke = 0.35) +
+        scale_x_continuous(breaks = brk_x, labels = lab_x,
+                           expand = expansion(mult = c(0.02, 0.02))) +
+        labs(x = NULL)
+    }
+    p +
+      scale_fill_manual(name   = "Convergence\n(R-hat)",
+                        values = conv_cols, drop = FALSE) +
+      scale_shape_manual(name  = "Convergence\n(R-hat)",
+                         values = c("Good"       = 21,
+                                    "Acceptable" = 22,
+                                    "Poor"       = 24,
+                                    "Unknown"    = 23),
+                         drop   = FALSE) +
+      # Force every convergence category to appear in the legend with a
+      # coloured symbol, even if the current data has no points at that level.
+      guides(
+        fill = guide_legend(
+          override.aes = list(
+            shape  = c(21, 22, 24, 23),
+            fill   = c("#27AE60", "#F39C12", "#E74C3C", "#95A5A6"),
+            colour = "#0F2A44",
+            size   = 3.2,
+            stroke = 0.4
+          )
+        ),
+        shape = "none"
+      ) +
+      scale_y_continuous(expand = expansion(mult = c(0.01, 0.05))) +
+      labs(
+        title    = "Posterior Mean Abundance",
+        subtitle = "Shaded band = 95% HDI (dashed edges); points coloured & shaped by R-hat convergence.",
+        y        = "Estimated Abundance (N)",
+        caption  = "FoxWatch — Bayesian SCM with effort-scaled p and shared λ"
+      ) +
+      theme_minimal(base_size = 14) +
+      theme(
+        plot.title         = element_text(face = "bold", hjust = 0.5,
+                                          colour = "#0d1b2a", size = 16),
+        plot.subtitle      = element_text(hjust = 0.5, colour = "#4a5568",
+                                          size = 11),
+        plot.caption       = element_text(hjust = 0.5, colour = "#7a8a9a",
+                                          size = 9, face = "italic"),
+        axis.title         = element_text(face = "bold", size = 13,
+                                          colour = "#0d1b2a"),
+        axis.text          = element_text(colour = "#0d1b2a"),
+        axis.text.x        = element_text(angle = if (use_dates) 45 else 0,
+                                          hjust = if (use_dates) 1 else 0.5,
+                                          lineheight = 0.9),
+        panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.35),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        plot.margin        = ggplot2::margin(15, 20, 12, 15),
+        legend.position    = "right",
+        legend.title       = element_text(face = "bold", size = 11),
+        legend.text        = element_text(size = 10)
+      )
+  })
+
+  output$mb_mode_plot <- renderPlotly({
+    if (is.null(model_b_rv$N_summary)) return(plotly_empty())
+    ggplotly(mb_mode_ggplot())
+  })
+
+  output$mb_mean_plot <- renderPlotly({
+    if (is.null(model_b_rv$N_summary)) return(plotly_empty())
+    ggplotly(mb_mean_ggplot())
+  })
+
+  output$mb_download_mode_png <- downloadHandler(
     filename = function()
-      paste0("FoxWatch_Abundance_", Sys.Date(), ".png"),
+      paste0("FoxWatch_ModelB_Mode_", Sys.Date(), ".png"),
     content = function(file) {
-      p <- abundance_ggplot()
+      p <- mb_mode_ggplot()
       req(!is.null(p))
-      ggplot2::ggsave(file, plot = p,
-                      width = 14, height = 6,
-                      dpi = 300, units = "in",
-                      bg = "white")
+      ggplot2::ggsave(file, plot = p, width = 12, height = 6,
+                      dpi = 300, units = "in", bg = "white")
     }
   )
-  
-  output$download_abundance_pdf <- downloadHandler(
+  output$mb_download_mode_pdf <- downloadHandler(
     filename = function()
-      paste0("FoxWatch_Abundance_", Sys.Date(), ".pdf"),
+      paste0("FoxWatch_ModelB_Mode_", Sys.Date(), ".pdf"),
     content = function(file) {
-      p <- abundance_ggplot()
+      p <- mb_mode_ggplot()
       req(!is.null(p))
-      ggplot2::ggsave(file, plot = p,
-                      width = 14, height = 6,
+      ggplot2::ggsave(file, plot = p, width = 12, height = 6,
                       device = "pdf", units = "in")
     }
   )
-  
+  output$mb_download_mean_png <- downloadHandler(
+    filename = function()
+      paste0("FoxWatch_ModelB_Mean_", Sys.Date(), ".png"),
+    content = function(file) {
+      p <- mb_mean_ggplot()
+      req(!is.null(p))
+      ggplot2::ggsave(file, plot = p, width = 12, height = 6,
+                      dpi = 300, units = "in", bg = "white")
+    }
+  )
+  output$mb_download_mean_pdf <- downloadHandler(
+    filename = function()
+      paste0("FoxWatch_ModelB_Mean_", Sys.Date(), ".pdf"),
+    content = function(file) {
+      p <- mb_mean_ggplot()
+      req(!is.null(p))
+      ggplot2::ggsave(file, plot = p, width = 12, height = 6,
+                      device = "pdf", units = "in")
+    }
+  )
+
+  output$mb_download_csv <- downloadHandler(
+    filename = function()
+      paste0("FoxWatch_ModelB_Abundance_", Sys.Date(), ".csv"),
+    content = function(file) {
+      df <- model_b_rv$N_summary
+      if (is.null(df)) {
+        showNotification("Run the model first.", type = "error")
+        return()
+      }
+      utils::write.csv(df, file, row.names = FALSE)
+    }
+  )
+  output$mb_download_params_csv <- downloadHandler(
+    filename = function()
+      paste0("FoxWatch_ModelB_Parameters_", Sys.Date(), ".csv"),
+    content = function(file) {
+      df <- model_b_rv$param_summary
+      if (is.null(df)) {
+        showNotification("Run the model first.", type = "error")
+        return()
+      }
+      utils::write.csv(df, file, row.names = FALSE)
+    }
+  )
+
   # ── Map section ────────────────────────────────────────────────────────
   observeEvent(input$make_map, {
     req(input$fox_csv, input$sites_csv, input$park_shp)
-    
+
     withProgress(message = "Creating map visualisation...", value = 0.1, {
       tryCatch({
         fox   <- readr::read_csv(input$fox_csv$datapath,
@@ -1268,7 +1837,7 @@ server <- function(input, output, session) {
         sites <- readr::read_csv(input$sites_csv$datapath,
                                  show_col_types = FALSE)
         incProgress(0.3, detail = "Processing detection data...")
-        
+
         fox <- fox %>% mutate(
           Date = suppressWarnings(lubridate::dmy(Date)),
           Time = suppressWarnings(hms::as_hms(Time)),
@@ -1282,7 +1851,7 @@ server <- function(input, output, session) {
         if (!is.na(drop_y)) years_keep <- setdiff(years_keep, drop_y)
         validate(need(length(years_keep) > 0,
                       "No years remain after filtering."))
-        
+
         site_levels <- fox_sites %>%
           filter(Year %in% years_keep) %>%
           distinct(SiteID) %>% arrange(SiteID) %>% pull(SiteID)
@@ -1293,7 +1862,7 @@ server <- function(input, output, session) {
           qualitative_hcl(N, palette = "Dynamic", c = 90, l = 55),
           site_levels
         )
-        
+
         incProgress(0.5, detail = "Loading spatial layers...")
         park <- tryCatch(read_vector_layer(input$park_shp),
                          error = function(e) NULL)
@@ -1304,7 +1873,7 @@ server <- function(input, output, session) {
             park <- sf::st_transform(park, 4326)
           }
         }
-        
+
         incProgress(0.7, detail = "Creating visualisation...")
         detections_year <- fox_sites %>%
           filter(Year %in% years_keep, Detection == "Fox") %>%
@@ -1314,11 +1883,11 @@ server <- function(input, output, session) {
                  SiteID = factor(SiteID, levels = site_levels))
         validate(need(nrow(detections_year) > 0,
                       "No fox detections found for selected years."))
-        
+
         detections_sf <- st_as_sf(
           detections_year,
           coords = c("longitude", "latitude"), crs = 4326)
-        
+
         ref_label   <- "Site Locations"
         year_levels <- c(ref_label, as.character(years_keep))
         detections_sf <- detections_sf %>%
@@ -1328,7 +1897,7 @@ server <- function(input, output, session) {
                              coords = c("longitude", "latitude"),
                              crs    = 4326) %>%
           dplyr::mutate(Year = factor(ref_label, levels = year_levels))
-        
+
         if (!is.null(park)) {
           bb <- sf::st_bbox(park)
         } else {
@@ -1345,7 +1914,7 @@ server <- function(input, output, session) {
         }
         xlim_bb <- c(bb["xmin"], bb["xmax"])
         ylim_bb <- c(bb["ymin"], bb["ymax"])
-        
+
         sites_lab       <- sf::st_transform(sites_sf, 3577)
         lab_xy          <- sf::st_coordinates(sites_lab)
         sites_lab       <- cbind(sites_lab,
@@ -1354,17 +1923,17 @@ server <- function(input, output, session) {
         lab_xy_ll       <- sf::st_coordinates(sites_lab)
         sites_lab$lab_lon <- lab_xy_ll[, 1]
         sites_lab$lab_lat <- lab_xy_ll[, 2]
-        
+
         max_det <- max(detections_sf$TotalDetections, na.rm = TRUE)
         brks    <- c(1, 5, 10, 20, 50, 100)
         brks    <- brks[brks <= max_det]
         if (length(brks) == 0) brks <- max_det
-        
+
         incProgress(0.9, detail = "Rendering map...")
         p <- ggplot()
         if (!is.null(park))
           p <- p + geom_sf(data = park, fill = "darkgrey", color = "black")
-        
+
         p <- p +
           geom_sf(data  = detections_sf,
                   aes(size = TotalDetections, colour = TotalDetections),
@@ -1402,19 +1971,19 @@ server <- function(input, output, session) {
           labs(title = "Fox Detections Per Site Per Year",
                size = "Detections", colour = "Detections",
                x = NULL, y = NULL)
-        
+
         map_plot_obj(p)
         incProgress(1, detail = "Map complete!")
         showNotification("Map generated successfully.",
                          type = "message", duration = 3)
-        
+
       }, error = function(e) {
         showNotification(paste("Error creating map:", e$message),
                          type = "error", duration = 5)
       })
     })
   })
-  
+
   output$detections_map <- renderPlot({
     p <- map_plot_obj()
     if (is.null(p)) {
@@ -1422,7 +1991,7 @@ server <- function(input, output, session) {
            main = "Upload spatial data files and click 'Generate Map'")
     } else { p }
   })
-  
+
   output$download_map_png <- downloadHandler(
     filename = function()
       sprintf("FoxWatch_Map_%s.png", Sys.Date()),

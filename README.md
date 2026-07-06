@@ -6,7 +6,7 @@
 
 **A User-Friendly Tool for Estimating Fox Abundance from Camera Traps Using Simultaneous-Count Models**
 
-Version 1.1 • Authors: Duminda S.B. Dissanayake & Graeme Armstrong • 2026
+Version 1.5 • Authors: Duminda S.B. Dissanayake & Graeme Armstrong • 2026
 Programme: NSW Saving Our Species
 
 ---
@@ -22,8 +22,8 @@ Key features:
 
 - Automated EXIF metadata parsing from camera-trap text files
 - Interactive spatial visualisation of fox detections per site per year
-- Bayesian SCM fitted via JAGS with two-chain MCMC sampling
-- Gelman-Rubin convergence diagnostics (R-hat) per 10-day block
+- Bayesian effort-scaled Simultaneous-Count Model (SCM) fitted via JAGS, with partial pooling across blocks and two-chain MCMC sampling
+- Gelman-Rubin R-hat, effective sample size (ESS), and Monte-Carlo standard error (MCSE) per 10-day block
 - Colour-coded results table and uncertainty ribbon plots
 - One-click CSV export of all abundance estimates
 
@@ -32,7 +32,7 @@ Key features:
 ```
 Foxwatch/
 ├── R/                          # Shiny application source
-│   └── Foxwatch version1.1.R
+│   └── Foxwatch version1.5.R
 ├── data/
 │   └── example/                # Example data shipped with the tool
 │       ├── camera_txt/         # Per-camera EXIF text files (CamOol_*)
@@ -72,7 +72,7 @@ Note: `grid` ships with base R and does not need to be installed separately.
 From an R session in the repository root:
 
 ```r
-shiny::runApp("R/Foxwatch version1.1.R")
+shiny::runApp("R/Foxwatch version1.5.R")
 ```
 
 Or open the file in RStudio and click **Run App**.

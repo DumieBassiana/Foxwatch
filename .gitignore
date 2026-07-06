@@ -23,6 +23,7 @@ src/*.dll
 
 # --- Shiny / app outputs (regenerated each run) -------------------------
 model.txt
+model_b.txt
 FoxWatch_Abundance_*.csv
 FoxWatch_Map_*.png
 DailyCounts_ForModel_*.txt

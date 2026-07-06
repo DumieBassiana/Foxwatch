@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use FoxWatch, please cite both the software and the accompanying paper."
 title: "FoxWatch: A User-Friendly Tool for Estimating Fox Abundance from Camera Traps Using Simultaneous-Count Models"
-version: "1.1"
+version: "1.5"
 date-released: "2026-01-01"
 license: MIT
 type: software
